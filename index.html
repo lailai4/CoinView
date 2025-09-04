@@ -6,18 +6,34 @@
   <title>Worldcoin Markets — LITE (No-Build)</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%230f172a'/%3E%3Cpath d='M18 68 Q40 30 82 50' stroke='%2322c55e' stroke-width='8' fill='none'/%3E%3C/svg%3E">
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React + ReactDOM UMD（浏览器直接跑） -->
+
+  <!-- ===== 多CDN兜底：React ===== -->
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+
+  <!-- ===== 多CDN兜底：ReactDOM ===== -->
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- 浏览器端 Babel（支持 JSX），仅此页使用，免打包 -->
+
+  <!-- ===== 多CDN兜底：Babel Standalone（用于直接跑 JSX） ===== -->
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.5/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.5/babel.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-neutral-950 text-neutral-100">
+  <noscript>
+    <div style="padding:16px;color:#fff;background:#b91c1c">需要启用 JavaScript 才能使用本应用</div>
+  </noscript>
+
   <div id="root"></div>
 
+  <!-- 下面是应用逻辑（JSX），由 Babel 在浏览器里转换后运行 -->
   <script type="text/babel">
     const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
+    // ===== API 与工具 =====
     const API = { coingecko: "https://api.coingecko.com/api/v3" };
     function cgHeaders() {
       const h = { accept: "application/json" };
@@ -61,6 +77,7 @@
       return \`\${d.getMonth()+1}/\${d.getDate()} \${hh}:\${mm}\`;
     };
 
+    // ===== UI 组件 =====
     function Header({ loading, onRefresh, offline, selfTestPassed, autoRefresh, setAutoRefresh, lastUpdated }) {
       return (
         <div className="bg-gradient-to-b from-cyan-700/20 to-transparent border-b border-neutral-800">
@@ -88,6 +105,7 @@
         </div>
       );
     }
+
     function Footer() {
       return (
         <div className="mx-auto max-w-7xl px-4 py-10 text-xs text-neutral-500">
@@ -95,6 +113,7 @@
         </div>
       );
     }
+
     function CandleChart({ data, height = 360, padding = { left: 50, right: 20, top: 20, bottom: 28 } }) {
       const ref = useRef(null);
       const [width, setWidth] = useState(800);
@@ -147,12 +166,12 @@
       );
     }
 
+    // ===== 主应用 =====
     function App() {
       const [coins, setCoins] = useState([]);
       const [selected, setSelected] = useState(null);
       const [ohlc, setOhlc] = useState([]);
       const [days, setDays] = useState(()=>{ try { return localStorage.getItem("wc_days") || "7"; } catch { return "7"; }});
-      const [query, setQuery] = useState("");
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState("");
       const [offlineDemo, setOfflineDemo] = useState(false);
@@ -178,9 +197,7 @@
           if (r.ok && Array.isArray(r.data)) {
             setCoins(r.data); if (!selected && r.data.length) setSelected(r.data[0]);
             setOfflineDemo(false); setLastUpdated(Date.now());
-          } else {
-            throw new Error("fallback");
-          }
+          } else { throw new Error("fallback"); }
         } catch {
           setError("无法获取实时行情（网络/CORS/限流）。已进入演示模式。");
           const demo = [
@@ -290,7 +307,7 @@
                   {selected ? (
                     <>
                       <div className="flex flex-wrap items-center gap-4">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items中心 gap-3">
                           <img src={selected.image} className="h-10 w-10 rounded-full" />
                           <div>
                             <div className="flex items-center gap-2">
@@ -327,4 +344,3 @@
   </script>
 </body>
 </html>
-
