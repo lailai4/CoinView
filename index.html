@@ -1,14 +1,330 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="/icon.png" />
-    <title>Worldcoin Markets — LITE</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-  </head>
-  <body class="bg-neutral-950">
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Worldcoin Markets — LITE (No-Build)</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%230f172a'/%3E%3Cpath d='M18 68 Q40 30 82 50' stroke='%2322c55e' stroke-width='8' fill='none'/%3E%3C/svg%3E">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + ReactDOM UMD（浏览器直接跑） -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- 浏览器端 Babel（支持 JSX），仅此页使用，免打包 -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-neutral-950 text-neutral-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const {useState,useEffect,useMemo,useRef,useCallback} = React;
+
+    const API = { coingecko: "https://api.coingecko.com/api/v3" };
+    function cgHeaders() {
+      const h = { accept: "application/json" };
+      if (typeof window !== "undefined" && window.CG_API_KEY) h["x-cg-api-key"] = window.CG_API_KEY;
+      return h;
+    }
+    async function safeFetchJSON(url, options = {}, { timeoutMs = 8000 } = {}) {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(new Error("timeout")), timeoutMs);
+      try {
+        const res = await fetch(url, { ...options, signal: ctrl.signal });
+        const ct = res.headers.get("content-type") || "";
+        let data = null;
+        try { data = ct.includes("application/json") ? await res.json() : await res.text(); } catch {}
+        if (!res.ok) return { ok:false, status:res.status, data, error:new Error(\`HTTP \${res.status}\`) };
+        return { ok:true, data };
+      } catch (error) { return { ok:false, error }; }
+      finally { clearTimeout(id); }
+    }
+    function niceTicks(min, max, count = 5) {
+      const span = max - min;
+      const step = Math.pow(10, Math.floor(Math.log10(Math.max(span / count, 1e-9))));
+      const err = (count * step) / Math.max(span, 1e-9);
+      const factor = err <= 0.15 ? 10 : err <= 0.35 ? 5 : err <= 0.75 ? 2 : 1;
+      const niceStep = step * factor;
+      const niceMin = Math.floor(min / niceStep) * niceStep;
+      const niceMax = Math.ceil(max / niceStep) * niceStep;
+      const ticks = [];
+      for (let v = niceMin; v <= niceMax + 1e-9; v += niceStep) ticks.push(v);
+      return ticks;
+    }
+    const formatNumber = (n) => {
+      const x = Number(n);
+      if (Math.abs(x) >= 1_000_000_000) return (x/1_000_000_000).toFixed(2)+"B";
+      if (Math.abs(x) >= 1_000_000) return (x/1_000_000).toFixed(2)+"M";
+      if (Math.abs(x) >= 1_000) return (x/1_000).toFixed(2)+"K";
+      return x.toFixed(2);
+    };
+    const formatTime = (ts) => {
+      const d = new Date(ts); const hh = String(d.getHours()).padStart(2,"0"); const mm = String(d.getMinutes()).padStart(2,"0");
+      return \`\${d.getMonth()+1}/\${d.getDate()} \${hh}:\${mm}\`;
+    };
+
+    function Header({ loading, onRefresh, offline, selfTestPassed, autoRefresh, setAutoRefresh, lastUpdated }) {
+      return (
+        <div className="bg-gradient-to-b from-cyan-700/20 to-transparent border-b border-neutral-800">
+          <div className="mx-auto max-w-7xl px-4 py-5 flex items-center gap-3">
+            <div className="h-9 w-9 rounded-2xl bg-cyan-500 flex items-center justify-center font-black text-black">M</div>
+            <div>
+              <div className="text-xl font-bold">Markets · 纯前端行情</div>
+              <div className="text-xs text-neutral-400">无登录 · 无后端 · 可直接上架 World 小程序</div>
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              {typeof selfTestPassed === "boolean" &&
+                <span className={"text-xs px-2 py-1 rounded-full border " + (selfTestPassed ? "border-green-500/40 text-green-400" : "border-red-500/40 text-red-400")}>
+                  {selfTestPassed ? "自检通过" : "自检失败"}
+                </span>}
+              {offline && <span className="text-xs px-2 py-1 rounded-full bg-amber-200/10 text-amber-300 border border-amber-400/40">离线演示</span>}
+              <label className="text-xs flex items-center gap-1 cursor-pointer select-none">
+                <input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)} /> 自动刷新
+              </label>
+              <button onClick={onRefresh} className="rounded-xl border border-neutral-700 px-3 py-2 hover:bg-neutral-800 active:scale-95 transition text-sm" disabled={loading}>
+                {loading ? "刷新中…" : "刷新"}
+              </button>
+            </div>
+          </div>
+          {lastUpdated && <div className="mx-auto max-w-7xl px-4 pb-3 text-xs text-neutral-500">上次更新：{new Date(lastUpdated).toLocaleString?.()}</div>}
+        </div>
+      );
+    }
+    function Footer() {
+      return (
+        <div className="mx-auto max-w-7xl px-4 py-10 text-xs text-neutral-500">
+          <div className="opacity-70">免责声明：仅供行情参考，非投资建议。若网络受限会自动进入演示模式。</div>
+        </div>
+      );
+    }
+    function CandleChart({ data, height = 360, padding = { left: 50, right: 20, top: 20, bottom: 28 } }) {
+      const ref = useRef(null);
+      const [width, setWidth] = useState(800);
+      useEffect(()=>{ const ro = new ResizeObserver(es=>{ for (const e of es) setWidth(e.contentRect.width); }); if (ref.current) ro.observe(ref.current); return ()=>ro.disconnect(); }, []);
+      const { candles, min, max, ticks } = useMemo(()=>{
+        if (!Array.isArray(data) || !data.length) return { candles: [], min: 0, max: 1, ticks: [] };
+        const prices = data.flatMap(d=>[d[2], d[3], d[1], d[4]]);
+        const min = Math.min(...prices), max = Math.max(...prices);
+        const pad = (max - min) * 0.05; const yMin = min - pad, yMax = max + pad;
+        const ticks = niceTicks(yMin, yMax, 5);
+        const candles = data.map(([ts, open, high, low, close])=>({ ts, open, high, low, close }));
+        return { candles, min: yMin, max: yMax, ticks };
+      }, [data]);
+      const W = width, H = height; const left = padding.left, right = padding.right, top = padding.top, bottom = padding.bottom;
+      const innerW = Math.max(10, W - left - right); const innerH = Math.max(10, H - top - bottom);
+      const xStep = candles.length ? innerW / candles.length : innerW;
+      const yToPx = (y) => top + (1 - (y - min) / (max - min || 1)) * innerH;
+      const timeTicks = useMemo(()=>{
+        if (!candles.length) return [];
+        const count = 6; const step = Math.max(1, Math.floor(candles.length / count));
+        const arr = []; for (let i=0;i<candles.length;i+=step) arr.push(candles[i]); if (candles.length) arr[arr.length-1] = candles[candles.length-1];
+        return arr;
+      }, [candles]);
+      return (
+        <div ref={ref} className="w-full">
+          <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+            {ticks.map((t,i)=> (
+              <g key={i}>
+                <line x1={left} x2={W-right} y1={yToPx(t)} y2={yToPx(t)} stroke="#2a2a2a" strokeDasharray="4 4" />
+                <text x={8} y={yToPx(t)+4} fontSize="10" fill="#a3a3a3" className="font-mono">{formatNumber(t)}</text>
+              </g>
+            ))}
+            {timeTicks.map((c,i)=> (
+              <text key={i} x={left + i*(innerW/Math.max(1, timeTicks.length-1))} y={H-6} fontSize="10" fill="#a3a3a3" textAnchor="middle" className="font-mono">{formatTime(c.ts)}</text>
+            ))}
+            {candles.map((c,i)=> {
+              const x = left + i*xStep + xStep*0.5; const wickTop = yToPx(c.high); const wickBot = yToPx(c.low);
+              const openY = yToPx(c.open); const closeY = yToPx(c.close); const up = c.close >= c.open;
+              const bodyTop = Math.min(openY, closeY); const bodyH = Math.max(Math.abs(closeY-openY), 1); const bodyW = Math.max(2, xStep*0.6);
+              return (
+                <g key={i}>
+                  <line x1={x} x2={x} y1={wickTop} y2={wickBot} stroke={up?"#22c55e":"#ef4444"} strokeWidth="1" />
+                  <rect x={x-bodyW/2} y={bodyTop} width={bodyW} height={bodyH} fill={up?"#22c55e":"#ef4444"} rx="2" />
+                </g>
+              );
+            })}
+            <rect x={left} y={top} width={innerW} height={innerH} fill="none" stroke="#2a2a2a" rx="8" />
+          </svg>
+        </div>
+      );
+    }
+
+    function App() {
+      const [coins, setCoins] = useState([]);
+      const [selected, setSelected] = useState(null);
+      const [ohlc, setOhlc] = useState([]);
+      const [days, setDays] = useState(()=>{ try { return localStorage.getItem("wc_days") || "7"; } catch { return "7"; }});
+      const [query, setQuery] = useState("");
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState("");
+      const [offlineDemo, setOfflineDemo] = useState(false);
+      const [selfTestPassed, setSelfTestPassed] = useState(null);
+      const [autoRefresh, setAutoRefresh] = useState(true);
+      const [lastUpdated, setLastUpdated] = useState(null);
+
+      useEffect(()=>{
+        try{
+          const t1 = niceTicks(10,100,5);
+          const asc = t1.every((v,i,a)=> i===0 || v>=a[i-1]);
+          const hasBounds = t1[0] <= 10 && t1[t1.length-1] >= 100;
+          setSelfTestPassed(asc && hasBounds && formatNumber(1_234_567)==="1.23M" && typeof formatTime(Date.now())==="string");
+        }catch{ setSelfTestPassed(false); }
+      }, []);
+      useEffect(()=>{ try{ localStorage.setItem("wc_days", String(days)); }catch{} }, [days]);
+
+      const fetchCoins = useCallback(async ()=>{
+        setLoading(true); setError("");
+        try{
+          const url = `${API.coingecko}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&price_change_percentage=1h,24h,7d`;
+          const r = await safeFetchJSON(url, { headers: cgHeaders() }, { timeoutMs: 7000 });
+          if (r.ok && Array.isArray(r.data)) {
+            setCoins(r.data); if (!selected && r.data.length) setSelected(r.data[0]);
+            setOfflineDemo(false); setLastUpdated(Date.now());
+          } else {
+            throw new Error("fallback");
+          }
+        } catch {
+          setError("无法获取实时行情（网络/CORS/限流）。已进入演示模式。");
+          const demo = [
+            { id:"bitcoin",symbol:"btc",name:"Bitcoin", image:"https://assets.coingecko.com/coins/images/1/large/bitcoin.png", current_price:65000, market_cap_rank:1 },
+            { id:"ethereum",symbol:"eth",name:"Ethereum", image:"https://assets.coingecko.com/coins/images/279/large/ethereum.png", current_price:3200, market_cap_rank:2 },
+            { id:"tether",symbol:"usdt",name:"Tether", image:"https://assets.coingecko.com/coins/images/325/large/Tether.png", current_price:1, market_cap_rank:3 },
+            { id:"binancecoin",symbol:"bnb",name:"BNB", image:"https://assets.coingecko.com/coins/images/825/large/binance-coin-logo.png", current_price:575, market_cap_rank:4 },
+            { id:"solana",symbol:"sol",name:"Solana", image:"https://assets.coingecko.com/coins/images/4128/large/solana.png", current_price:150, market_cap_rank:5 },
+            { id:"usd-coin",symbol:"usdc",name:"USD Coin", image:"https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png", current_price:1, market_cap_rank:6 },
+            { id:"ripple",symbol:"xrp",name:"XRP", image:"https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png", current_price:0.6, market_cap_rank:7 },
+            { id:"cardano",symbol:"ada",name:"Cardano", image:"https://assets.coingecko.com/coins/images/975/large/cardano.png", current_price:0.45, market_cap_rank:8 },
+            { id:"dogecoin",symbol:"doge",name:"Dogecoin", image:"https://assets.coingecko.com/coins/images/5/large/dogecoin.png", current_price:0.12, market_cap_rank:9 },
+            { id:"tron",symbol:"trx",name:"TRON", image:"https://assets.coingecko.com/coins/images/1094/large/tron-logo.png", current_price:0.12, market_cap_rank:10 },
+            { id:"toncoin",symbol:"ton",name:"Toncoin", image:"https://assets.coingecko.com/coins/images/17980/large/ton_symbol.png", current_price:7.5, market_cap_rank:11 },
+            { id:"polkadot",symbol:"dot",name:"Polkadot", image:"https://assets.coingecko.com/coins/images/12171/large/polkadot.png", current_price:6.2, market_cap_rank:12 },
+            { id:"avalanche-2",symbol:"avax",name:"Avalanche", image:"https://assets.coingecko.com/coins/images/12559/large/coin-round-red.png", current_price:32, market_cap_rank:13 },
+            { id:"shiba-inu",symbol:"shib",name:"Shiba Inu", image:"https://assets.coingecko.com/coins/images/11939/large/shiba.png", current_price:0.00002, market_cap_rank:14 },
+            { id:"chainlink",symbol:"link",name:"Chainlink", image:"https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png", current_price:14.5, market_cap_rank:15 },
+            { id:"polygon-pos",symbol:"matic",name:"Polygon", image:"https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png", current_price:0.9, market_cap_rank:16 },
+            { id:"litecoin",symbol:"ltc",name:"Litecoin", image:"https://assets.coingecko.com/coins/images/2/large/litecoin.png", current_price:78, market_cap_rank:17 },
+            { id:"uniswap",symbol:"uni",name:"Uniswap", image:"https://assets.coingecko.com/coins/images/12504/large/uniswap-uni.png", current_price:8, market_cap_rank:18 },
+            { id:"stellar",symbol:"xlm",name:"Stellar", image:"https://assets.coingecko.com/coins/images/100/large/Stellar_symbol_black_RGB.png", current_price:0.12, market_cap_rank:19 },
+            { id:"monero",symbol:"xmr",name:"Monero", image:"https://assets.coingecko.com/coins/images/69/large/monero_logo.png", current_price:175, market_cap_rank:20 },
+          ];
+          setCoins(demo); if (!selected) setSelected(demo[0]); setOfflineDemo(true); setLastUpdated(Date.now());
+        } finally { setLoading(false); }
+      }, [selected]);
+
+      useEffect(()=>{ fetchCoins(); }, [fetchCoins]);
+      useEffect(()=>{
+        if (!autoRefresh) return;
+        const id = setInterval(()=>{ fetchCoins(); if (selected) fetchOHLC(selected.id, days); }, 30000);
+        return ()=> clearInterval(id);
+      }, [autoRefresh, fetchCoins, selected, days]);
+
+      const fetchOHLC = useCallback(async (coinId, d) => {
+        setOhlc([]);
+        const url = `${API.coingecko}/coins/${coinId}/ohlc?vs_currency=usd&days=${d}`;
+        const r = await safeFetchJSON(url, { headers: cgHeaders() }, { timeoutMs: 7000 });
+        if (r.ok && Array.isArray(r.data) && r.data.length) {
+          setOhlc(r.data);
+        } else {
+          const base = Date.now(); let price = selected?.current_price || 65000;
+          const arr = Array.from({ length: 48 }, (_, i) => {
+            const ts = base - (48 - i) * 3600 * 1000;
+            const vol = (Math.random()*0.02 - 0.01) * price;
+            const open = price, close = price + vol;
+            const high = Math.max(open, close) + Math.random()*(price*0.004);
+            const low  = Math.min(open, close) - Math.random()*(price*0.004);
+            price = close; return [ts, open, high, low, close];
+          });
+          setOhlc(arr);
+        }
+      }, [selected]);
+
+      useEffect(()=>{ if (selected) fetchOHLC(selected.id, days); }, [selected, days, fetchOHLC]);
+
+      const [queryText, setQueryText] = useState("");
+      const filtered = useMemo(()=>{
+        const q = queryText.trim().toLowerCase(); if (!q) return coins;
+        return coins.filter(c=> c.name.toLowerCase().includes(q) || c.symbol.toLowerCase().includes(q));
+      }, [coins, queryText]);
+
+      const money = (v) => "$" + new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(v ?? 0);
+      const cls = (...xs)=> xs.filter(Boolean).join(" ");
+
+      return (
+        <div className="min-h-screen">
+          <Header
+            loading={loading}
+            onRefresh={()=>{ fetchCoins(); if (selected) fetchOHLC(selected.id, days); }}
+            offline={offlineDemo}
+            selfTestPassed={selfTestPassed}
+            autoRefresh={autoRefresh}
+            setAutoRefresh={setAutoRefresh}
+            lastUpdated={lastUpdated}
+          />
+
+          <div className="mx-auto max-w-7xl px-4 py-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="lg:col-span-1">
+                <div className="sticky top-0 backdrop-blur supports-[backdrop-filter]:bg-neutral-900/60 z-10">
+                  <div className="flex items-center gap-3 py-3">
+                    <input value={queryText} onChange={e=>setQueryText(e.target.value)} placeholder="搜索币种（BTC, ETH...）" className="w-full rounded-2xl bg-neutral-900 border border-neutral-800 px-4 py-2 outline-none focus:ring-2 focus:ring-cyan-500" />
+                  </div>
+                </div>
+                <div className="divide-y divide-neutral-800 rounded-2xl border border-neutral-800 overflow-hidden">
+                  {filtered.map(c=> (
+                    <button key={c.id} onClick={()=>setSelected(c)} className={cls("w-full flex items-center gap-3 p-3 text-left hover:bg-neutral-900/70 transition", selected?.id===c.id && "bg-neutral-900/70") }>
+                      <img src={c.image} alt={c.symbol} className="h-8 w-8 rounded-full" />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{c.name}</span>
+                          <span className="text-xs text-neutral-400">{c.symbol?.toUpperCase()}</span>
+                          <span className="ml-auto font-mono">{money(c.current_price)}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-neutral-400">市值排名 #{c.market_cap_rank}</div>
+                      </div>
+                    </button>
+                  ))}
+                  {!filtered.length && <div className="p-6 text-center text-neutral-400">没有匹配的币种</div>}
+                </div>
+              </div>
+
+              <div className="lg:col-span-2">
+                <div className="rounded-3xl border border-neutral-800 p-4 bg-neutral-900/40">
+                  {selected ? (
+                    <>
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="flex items-center gap-3">
+                          <img src={selected.image} className="h-10 w-10 rounded-full" />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h2 className="text-xl font-bold">{selected.name}</h2>
+                              <span className="text-neutral-400">{selected.symbol?.toUpperCase()}</span>
+                              <span className="ml-2 text-sm text-neutral-400">#{selected.market_cap_rank}</span>
+                            </div>
+                            <div className="text-2xl font-mono mt-1">${selected.current_price?.toLocaleString?.() ?? selected.current_price}</div>
+                          </div>
+                        </div>
+                        <div className="ml-auto flex items-center gap-2">
+                          {["1","7","30","90","180","365","max"].map(d=> (
+                            <button key={d} onClick={()=>setDays(d)} className={cls("rounded-full px-3 py-1 text-sm border border-neutral-700 hover:bg-neutral-800", days===d && "bg-cyan-500 text-black border-cyan-400") }>
+                              {d==="1"?"1D": d==="7"?"7D": d==="30"?"30D": d==="90"?"90D": d==="180"?"180D": d==="365"?"1Y":"MAX"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="mt-4"><CandleChart data={ohlc} height={360} padding={{ left: 56, right: 20, top: 20, bottom: 32 }} /></div>
+                    </>
+                  ) : (<div className="p-8 text-center text-neutral-400">请选择左侧币种查看详情</div>)}
+                </div>
+                {error && <div className="mt-3 text-amber-300 text-sm">{error}</div>}
+              </div>
+            </div>
+          </div>
+
+          <Footer />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
 </html>
+
